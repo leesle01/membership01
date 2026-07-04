@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>리슬 구매인증 스캔 데모</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, sans-serif;
+    background: #f1efe8; color: #2c2c2a; padding: 16px;
+  }
+  h1 { font-size: 17px; font-weight: 500; margin: 0 0 4px; }
+  p.sub { font-size: 13px; color: #5f5e5a; margin: 0 0 16px; }
+  .card {
+    background: #fff; border: 0.5px solid #d3d1c7; border-radius: 12px;
+    padding: 16px; margin-bottom: 16px;
+  }
+  #video-wrap {
+    display: none; width: 100%; max-width: 320px; aspect-ratio: 1/1;
+    margin: 0 auto 12px; border-radius: 12px; overflow: hidden; background: #000;
+  }
+  #qr-reader { width: 100%; height: 100%; }
+  button {
+    width: 100%; padding: 12px; border-radius: 8px; border: 0.5px solid #b4b2a9;
+    background: #fff; font-size: 14px; font-weight: 500; margin-top: 4px;
+  }
+  button.primary { background: #2c2c2a; color: #fff; border: none; }
+  #status { font-size: 13px; color: #5f5e5a; margin-top: 8px; min-height: 18px; }
+  #result { display: none; text-align: center; padding: 20px; }
+  #result .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: #FAC775; color: #412402; font-size: 13px; font-weight: 500;
+    padding: 6px 14px; border-radius: 20px; margin-bottom: 12px;
+  }
+  svg { width: 100%; max-width: 220px; display: block; margin: 0 auto; }
+  input[type=text] { width: 100%; padding: 10px; border-radius: 8px; border: 0.5px solid #b4b2a9; font-size: 14px; margin-bottom: 8px; }
+  label { font-size: 12px; color: #5f5e5a; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<h1>리슬 부산센텀 · 구매인증</h1>
+<p class="sub">영수증 QR을 스캔하면 지도에 구매인증 핀이 찍힙니다</p>
+
+<div class="card">
+  <div id="step-input">
+    <label>출발지</label>
+    <input type="text" id="origin" placeholder="예: 서울, 부산, 대구...">
+    <button class="primary" id="start-btn">영수증 QR 스캔 시작</button>
+    <button id="manual-btn">카메라 대신 코드 직접 입력</button>
+  </div>
+
+  <div id="video-wrap">
+    <div id="qr-reader"></div>
+  </div>
+  <div id="status"></div>
+
+  <div id="result">
+    <div class="badge">&#10003; 구매인증 완료</div>
+    <svg viewBox="0 0 300 340" xmlns="http://www.w3.org/2000/svg">
+      <path d="M150 12 C 120 20, 100 40, 95 70 C 80 85, 70 110, 78 135 C 60 150, 55 180, 65 205 C 55 225, 60 250, 80 265 C 85 290, 105 310, 130 320 C 150 332, 175 328, 190 310 C 210 300, 225 280, 220 255 C 235 240, 240 210, 225 190 C 235 165, 230 135, 210 120 C 215 95, 200 70, 180 55 C 185 35, 172 15, 150 12 Z" fill="#f1efe8" stroke="#b4b2a9" stroke-width="1"/>
+      <circle cx="185" cy="270" r="9" fill="#D85A30"/>
+      <circle cx="185" cy="270" r="16" fill="#D85A30" opacity="0.25"/>
+      <text x="185" y="292" text-anchor="middle" font-size="10" fill="#5f5e5a">부산</text>
+    </svg>
+    <p style="font-size:13px; color:#5f5e5a; margin-top:8px;" id="result-detail"></p>
+    <button id="reset-btn" style="margin-top:12px;">처음으로 (다음 손님)</button>
+  </div>
+</div>
+
+<div class="card" style="font-size:12px; color:#5f5e5a; line-height:1.6;">
+  이 파일은 프로토타입입니다. 실제 배포 시:<br>
+  1) 카카오맵 API 키를 연결해 실제 지도로 교체<br>
+  2) 스캔된 QR 코드값을 Google Apps Script 엔드포인트로 전송해 시트에 기록<br>
+  3) 로그인된 회원ID를 카페24 스마트디자인 변수로 함께 전송<br>
+  하도록 아래 <code>onScanSuccess</code> 함수 안 fetch 호출 부분만 실제 엔드포인트로 교체하면 됩니다.
+</div>
+
+<script>
+const stepInput = document.getElementById('step-input');
+const videoWrap = document.getElementById('video-wrap');
+const status = document.getElementById('status');
+const resultBox = document.getElementById('result');
+const resultDetail = document.getElementById('result-detail');
+const startBtn = document.getElementById('start-btn');
+const manualBtn = document.getElementById('manual-btn');
+const resetBtn = document.getElementById('reset-btn');
+
+let html5QrCode = null;
+
+startBtn.addEventListener('click', async () => {
+  if (typeof Html5Qrcode === 'undefined') {
+    status.textContent = '스캔 라이브러리를 불러오지 못했습니다. 코드 직접 입력을 이용하세요.';
+    return;
+  }
+  stepInput.classList.add('hidden');
+  videoWrap.style.display = 'block';
+  status.textContent = '영수증 QR을 프레임 안에 맞춰주세요';
+
+  html5QrCode = new Html5Qrcode('qr-reader');
+  const config = {
+    fps: 10,
+    qrbox: { width: 220, height: 220 },
+    aspectRatio: 1.0
+  };
+
+  try {
+    await html5QrCode.start(
+      { facingMode: 'environment' },
+      config,
+      (decodedText) => { onScanSuccess(decodedText); },
+      () => { /* 인식 실패 프레임은 무시, 다음 프레임 계속 시도 */ }
+    );
+  } catch (err) {
+    status.textContent = '카메라 접근이 거부되었거나 사용할 수 없습니다.';
+    videoWrap.style.display = 'none';
+    stepInput.classList.remove('hidden');
+  }
+});
+
+manualBtn.addEventListener('click', () => {
+  const code = prompt('영수증 승인번호 뒷자리를 입력하세요');
+  if (code) onScanSuccess(code);
+});
+
+async function stopScanner() {
+  if (html5QrCode) {
+    try {
+      const state = html5QrCode.getState();
+      if (state === Html5QrcodeScannerState.SCANNING) {
+        await html5QrCode.stop();
+      }
+      html5QrCode.clear();
+    } catch (e) {
+      // 스캐너가 이미 정지된 경우 무시
+    }
+    html5QrCode = null;
+  }
+}
+
+async function onScanSuccess(codeValue) {
+  await stopScanner();
+  videoWrap.style.display = 'none';
+  status.textContent = '';
+
+  const origin = document.getElementById('origin').value || '미입력';
+
+  // 실제 배포 시 이 부분을 실제 Apps Script 엔드포인트로 교체
+  // fetch('https://script.google.com/macros/s/XXXX/exec', {
+  //   method: 'POST',
+  //   headers: {'Content-Type': 'text/plain'},
+  //   body: JSON.stringify({ code: codeValue, origin: origin, event: 'busan_centum_2026' })
+  // });
+
+  resultDetail.textContent = origin + '에서 온 팬 · 코드 ' + codeValue.slice(-6);
+  resultBox.style.display = 'block';
+}
+
+resetBtn.addEventListener('click', () => {
+  resultBox.style.display = 'none';
+  stepInput.classList.remove('hidden');
+  document.getElementById('origin').value = '';
+  status.textContent = '';
+});
+</script>
+
+</body>
+</html>
